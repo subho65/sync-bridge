@@ -328,7 +328,7 @@ function LandingView({ onJoin, showToast, user }) {
           <div className="relative text-center"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-700"></div></div><span className="relative px-2 bg-slate-800 text-slate-500 text-sm">OR JOIN</span></div>
 
           <form onSubmit={(e) => { e.preventDefault(); if (inputCode.length === 6) verifyAndJoin(inputCode); }} className="space-y-3">
-            <input type="text" maxLength={6} placeholder="Enter 6-digit Code" value={inputCode} onChange={(e) => setInputCode(e.target.value.replace(/\D/g, ''))} className="w-full bg-slate-900/50 border border-slate-700 text-white text-center text-2xl tracking-widest py-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" />
+            <input type="number" maxLength={6} placeholder="Enter 6-digit Code" value={inputCode} onChange={(e) => setInputCode(e.target.value.replace(/\D/g, ''))} className="w-full bg-slate-900/50 border border-slate-700 text-white text-center text-2xl tracking-widest py-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" />
 
             <div className="grid grid-cols-2 gap-3">
               <button type="submit" disabled={inputCode.length !== 6 || loading} className="flex items-center justify-center gap-2 bg-slate-700 disabled:opacity-50 hover:bg-slate-600 text-white font-medium py-3 rounded-xl transition-all">

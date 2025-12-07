@@ -58,7 +58,7 @@ const initFirebase = () => {
     authDomain: "sync-bridge-59a19.firebaseapp.com",
     projectId: "sync-bridge-59a19",
     // NOTE: If uploads still fail with 404, try changing this to: "sync-bridge-59a19.appspot.com"
-    storageBucket: "sync-bridge-59a19.appspot.com",
+    storageBucket: "sync-bridge-59a19.firebasestorage.app",
     messagingSenderId: "774785880034",
     appId: "1:774785880034:web:76fe312ff23cb1d51233bb",
     measurementId: "G-8Q6LVMSKK7"

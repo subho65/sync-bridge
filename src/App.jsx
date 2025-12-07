@@ -54,14 +54,13 @@ const robustCopy = async (text) => {
 const initFirebase = () => {
   // --- YOUR CONFIGURATION ---
   const firebaseConfig = {
-    apiKey: "AIzaSyBwdWRjzCwqzk3X56SBcAdpFExAq5o6clw",
-    authDomain: "sync-bridge-59a19.firebaseapp.com",
-    projectId: "sync-bridge-59a19",
-    // NOTE: If uploads still fail with 404, try changing this to: "sync-bridge-59a19.appspot.com"
-    storageBucket: "sync-bridge-59a19.firebasestorage.app",
-    messagingSenderId: "774785880034",
-    appId: "1:774785880034:web:76fe312ff23cb1d51233bb",
-    measurementId: "G-8Q6LVMSKK7"
+    apiKey: "AIzaSyCS7HPWqw_K7UXwLNM6-F5PYX6yicph7qs",
+    authDomain: "sync-bridge-36fac.firebaseapp.com",
+    projectId: "sync-bridge-36fac",
+    storageBucket: "sync-bridge-36fac.firebasestorage.app",
+    messagingSenderId: "781025230842",
+    appId: "1:781025230842:web:122e30b3fbe781c5772e43",
+    measurementId: "G-0J1HG9G9Q0"
   };
 
   const app = initializeApp(firebaseConfig);

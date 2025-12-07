@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Scanner } from '@yudiel/react-qr-scanner'; // <--- NEW IMPORT
+import { Scanner } from '@yudiel/react-qr-scanner';
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import {
-  getFirestore, doc, onSnapshot, setDoc, updateDoc, arrayUnion, arrayRemove, initializeFirestore, enableNetwork, disableNetwork
+  getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc, arrayUnion, arrayRemove, initializeFirestore, enableNetwork, disableNetwork
 } from "firebase/firestore";
 import {
   getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject
@@ -55,7 +55,7 @@ const { auth, db, storage } = initFirebase();
 // --- COMPONENTS ---
 
 const ToastContainer = ({ toasts }) => (
-  <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+  <div className="fixed bottom-4 right-4 z-[200] flex flex-col gap-2 pointer-events-none">
     {toasts.map((toast) => (
       <div key={toast.id} className={`pointer-events-auto px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium flex items-center gap-2 animate-in slide-in-from-bottom-5 fade-in duration-300 ${toast.type === 'error' ? 'bg-red-500' : 'bg-slate-800'}`}>
         {toast.type === 'error' ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
@@ -105,13 +105,26 @@ function App() {
     signInAnonymously(auth).catch((e) => console.warn("Auth failed", e));
 
     // Deep Link Check
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get("room");
-    if (roomParam && roomParam.length === 6) {
-      setRoomCode(roomParam);
-      setView("session");
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    const checkDeepLink = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = params.get("room");
+      if (roomParam && roomParam.length === 6) {
+        // VERIFY ROOM EXISTENCE
+        const docRef = doc(db, "sync_rooms", roomParam);
+        try {
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists() && docSnap.data().created) {
+            setRoomCode(roomParam);
+            setView("session");
+            window.history.replaceState({}, document.title, window.location.pathname);
+          } else {
+            showToast("Room not found or expired", "error");
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        } catch (e) { console.error(e); }
+      }
+    };
+    checkDeepLink();
 
     const handleStatus = () => {
       const online = navigator.onLine;
@@ -150,7 +163,11 @@ function App() {
   return (
     <>
       {view === "landing" ? (
-        <LandingView onJoin={(code) => { setRoomCode(code); setView("session"); }} showToast={showToast} />
+        <LandingView
+          onJoin={(code) => { setRoomCode(code); setView("session"); }}
+          showToast={showToast}
+          user={user}
+        />
       ) : (
         <SessionView user={user} roomCode={roomCode} onExit={() => setView("landing")} showToast={showToast} />
       )}
@@ -159,27 +176,69 @@ function App() {
   );
 }
 
-function LandingView({ onJoin, showToast }) {
+function LandingView({ onJoin, showToast, user }) {
   const [inputCode, setInputCode] = useState("");
   const [isScanning, setIsScanning] = useState(false);
+  const [scanError, setScanError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // --- LOGIC: VERIFY ROOM BEFORE JOINING ---
+  const verifyAndJoin = async (code) => {
+    setLoading(true);
+    try {
+      const docRef = doc(db, "sync_rooms", code);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists() && docSnap.data().created) {
+        setLoading(false);
+        onJoin(code);
+      } else {
+        setLoading(false);
+        showToast("Room does not exist!", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+      showToast("Connection error", "error");
+    }
+  };
+
+  // --- LOGIC: CREATE ROOM EXPLICITLY ---
+  const createRoom = async () => {
+    setLoading(true);
+    const code = generateRoomCode();
+    try {
+      await setDoc(doc(db, "sync_rooms", code), {
+        created: true,
+        createdAt: Date.now(),
+        creator: user.uid,
+        text: "",
+        files: []
+      });
+      setLoading(false);
+      onJoin(code);
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+      showToast("Failed to create room", "error");
+    }
+  };
 
   const handleScan = (results) => {
     if (results && results.length > 0) {
       const rawValue = results[0].rawValue;
       try {
-        // 1. Try to extract 'room' param from a URL (e.g., https://...?room=123456)
         const url = new URL(rawValue);
         const room = url.searchParams.get("room");
         if (room && room.length === 6) {
           setIsScanning(false);
-          onJoin(room);
+          verifyAndJoin(room);
           return;
         }
       } catch (e) {
-        // 2. Not a URL? Maybe they scanned just the 6-digit text
         if (rawValue.length === 6 && !isNaN(rawValue)) {
           setIsScanning(false);
-          onJoin(rawValue);
+          verifyAndJoin(rawValue);
           return;
         }
       }
@@ -187,38 +246,69 @@ function LandingView({ onJoin, showToast }) {
   };
 
   const handleError = (error) => {
-    console.error(error);
-    // Suppress minor camera errors, but you could showToast if needed
+    let msg = "Camera error.";
+    if (error.name === 'NotAllowedError') msg = "Camera permission denied.";
+    else if (error.name === 'NotSupportedError') msg = "HTTPS required for camera.";
+    setScanError(msg);
   };
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-6 font-sans">
 
-      {/* FULL SCREEN SCANNER OVERLAY */}
+      {/* --- UPDATED SCANNER OVERLAY (FLOATING UI) --- */}
       {isScanning && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col">
-          <div className="relative flex-1 flex items-center justify-center bg-black">
-            <Scanner
-              onScan={handleScan}
-              onError={handleError}
-              components={{ audio: false, finder: true }}
-              styles={{ container: { width: '100%', height: '100%' } }}
-            />
-            {/* Overlay Instructions */}
-            <div className="absolute top-10 text-center px-4">
-              <div className="bg-black/60 px-4 py-2 rounded-full text-sm font-medium backdrop-blur-md">
-                Point camera at Room QR Code
+        <div className="fixed inset-0 z-[100] bg-black">
+          {/* Close Button (Top Right) */}
+          <button
+            onClick={() => { setIsScanning(false); setScanError(null); }}
+            className="absolute top-6 right-6 z-[120] bg-black/50 hover:bg-black/80 text-white p-2 rounded-full backdrop-blur-md transition-all"
+          >
+            <X className="w-8 h-8" />
+          </button>
+
+          {/* Background Scanner */}
+          <div className="absolute inset-0 flex items-center justify-center bg-black">
+            {scanError ? (
+              <div className="px-6 text-center z-[110]">
+                <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+                <p className="text-red-400 font-medium mb-2">{scanError}</p>
+                <p className="text-slate-500 text-sm">Try typing the code manually.</p>
               </div>
+            ) : (
+              <Scanner
+                onScan={handleScan}
+                onError={handleError}
+                components={{ audio: false, finder: false }}
+                styles={{ container: { width: '100%', height: '100%' }, video: { objectFit: 'cover' } }}
+                constraints={{ facingMode: 'environment' }}
+              />
+            )}
+          </div>
+
+          {/* Floating UI Overlay */}
+          {!scanError && (
+            <div className="absolute inset-0 z-[110] pointer-events-none flex flex-col items-center justify-between py-12">
+              <div className="bg-black/60 px-6 py-3 rounded-full text-sm font-medium backdrop-blur-md text-white mt-8">
+                Scan Room QR Code
+              </div>
+
+              {/* Decorative Finder */}
+              <div className="w-64 h-64 border-2 border-white/50 rounded-2xl relative">
+                <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-blue-500 -ml-1 -mt-1 rounded-tl-md"></div>
+                <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-blue-500 -mr-1 -mt-1 rounded-tr-md"></div>
+                <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-blue-500 -ml-1 -mb-1 rounded-bl-md"></div>
+                <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-blue-500 -mr-1 -mb-1 rounded-br-md"></div>
+              </div>
+
+              {/* Floating Cancel Button */}
+              <button
+                onClick={() => { setIsScanning(false); setScanError(null); }}
+                className="pointer-events-auto bg-white text-slate-900 font-bold py-3 px-8 rounded-full shadow-lg hover:scale-105 transition-transform"
+              >
+                Cancel Scan
+              </button>
             </div>
-          </div>
-          <div className="p-6 bg-slate-900 pb-10">
-            <button
-              onClick={() => setIsScanning(false)}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-4 rounded-xl transition-colors border border-slate-700"
-            >
-              Cancel Scan
-            </button>
-          </div>
+          )}
         </div>
       )}
 
@@ -229,20 +319,21 @@ function LandingView({ onJoin, showToast }) {
           <p className="text-slate-400">Share text & multiple files globally.</p>
         </div>
         <div className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700/50 backdrop-blur-sm space-y-6">
-          <button onClick={() => onJoin(generateRoomCode())} className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-4 rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-900/20">
-            <Monitor className="w-5 h-5" /> <span>Start New Session</span>
+
+          <button onClick={createRoom} disabled={loading} className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold py-4 rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-900/20">
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Monitor className="w-5 h-5" />}
+            <span>Start New Session</span>
           </button>
 
           <div className="relative text-center"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-700"></div></div><span className="relative px-2 bg-slate-800 text-slate-500 text-sm">OR JOIN</span></div>
 
-          <form onSubmit={(e) => { e.preventDefault(); if (inputCode.length === 6) onJoin(inputCode); }} className="space-y-3">
+          <form onSubmit={(e) => { e.preventDefault(); if (inputCode.length === 6) verifyAndJoin(inputCode); }} className="space-y-3">
             <input type="text" maxLength={6} placeholder="Enter 6-digit Code" value={inputCode} onChange={(e) => setInputCode(e.target.value.replace(/\D/g, ''))} className="w-full bg-slate-900/50 border border-slate-700 text-white text-center text-2xl tracking-widest py-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" />
 
             <div className="grid grid-cols-2 gap-3">
-              <button type="submit" disabled={inputCode.length !== 6} className="flex items-center justify-center gap-2 bg-slate-700 disabled:opacity-50 hover:bg-slate-600 text-white font-medium py-3 rounded-xl transition-all">
-                <Smartphone className="w-5 h-5" /> <span>Join</span>
+              <button type="submit" disabled={inputCode.length !== 6 || loading} className="flex items-center justify-center gap-2 bg-slate-700 disabled:opacity-50 hover:bg-slate-600 text-white font-medium py-3 rounded-xl transition-all">
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Smartphone className="w-5 h-5" />} <span>Join</span>
               </button>
-              {/* SCAN QR BUTTON */}
               <button type="button" onClick={() => setIsScanning(true)} className="flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-white font-medium py-3 rounded-xl transition-all border border-slate-600">
                 <Camera className="w-5 h-5" /> <span>Scan QR</span>
               </button>
@@ -308,6 +399,8 @@ function SessionView({ user, roomCode, onExit, showToast }) {
 
       const safeName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
       const storageRef = ref(storage, `uploads/${roomCode}/${safeName}`);
+
+      // Resumable upload used for progress bars
       const uploadTask = uploadBytesResumable(storageRef, file);
 
       uploadTask.on('state_changed',
@@ -328,8 +421,6 @@ function SessionView({ user, roomCode, onExit, showToast }) {
           };
           await updateDoc(docRef, {
             files: arrayUnion(newFile), lastSender: user.uid
-          }).catch(async () => {
-            await setDoc(docRef, { files: [newFile], lastSender: user.uid }, { merge: true });
           });
           setActiveUploads(prev => { const n = { ...prev }; delete n[file.name]; return n; });
           showToast(`${file.name} uploaded!`);

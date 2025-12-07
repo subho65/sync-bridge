@@ -10,7 +10,7 @@ import {
 } from "firebase/storage";
 import {
   Copy, Smartphone, Monitor, Zap, Download, Trash2, X, FileText,
-  UploadCloud, CheckCircle, Wifi, WifiOff, ArrowRight, Loader2, RefreshCw, AlertTriangle, QrCode, Camera
+  UploadCloud, CheckCircle, Wifi, WifiOff, ArrowRight, Loader2, RefreshCw, AlertTriangle, QrCode, Camera, Users
 } from "lucide-react";
 
 // --- CONFIGURATION ---
@@ -104,12 +104,10 @@ function App() {
     const unsubscribe = onAuthStateChanged(auth, setUser);
     signInAnonymously(auth).catch((e) => console.warn("Auth failed", e));
 
-    // Deep Link Check
     const checkDeepLink = async () => {
       const params = new URLSearchParams(window.location.search);
       const roomParam = params.get("room");
       if (roomParam && roomParam.length === 6) {
-        // VERIFY ROOM EXISTENCE
         const docRef = doc(db, "sync_rooms", roomParam);
         try {
           const docSnap = await getDoc(docRef);
@@ -117,6 +115,10 @@ function App() {
             setRoomCode(roomParam);
             setView("session");
             window.history.replaceState({}, document.title, window.location.pathname);
+
+            // Trigger connection signal for the host
+            updateDoc(docRef, { connectionTrigger: Date.now() }).catch(console.warn);
+
           } else {
             showToast("Room not found or expired", "error");
             window.history.replaceState({}, document.title, window.location.pathname);
@@ -181,8 +183,8 @@ function LandingView({ onJoin, showToast, user }) {
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
-  // --- LOGIC: VERIFY ROOM BEFORE JOINING ---
   const verifyAndJoin = async (code) => {
     setLoading(true);
     try {
@@ -191,7 +193,17 @@ function LandingView({ onJoin, showToast, user }) {
 
       if (docSnap.exists() && docSnap.data().created) {
         setLoading(false);
-        onJoin(code);
+        setIsScanning(false);
+
+        // 1. SIGNAL THE HOST
+        await updateDoc(docRef, { connectionTrigger: Date.now() });
+
+        // 2. SHOW ANIMATION LOCALLY
+        setShowSuccess(true);
+        setTimeout(() => {
+          onJoin(code);
+        }, 1500);
+
       } else {
         setLoading(false);
         showToast("Room does not exist!", "error");
@@ -203,7 +215,6 @@ function LandingView({ onJoin, showToast, user }) {
     }
   };
 
-  // --- LOGIC: CREATE ROOM EXPLICITLY ---
   const createRoom = async () => {
     setLoading(true);
     const code = generateRoomCode();
@@ -213,10 +224,15 @@ function LandingView({ onJoin, showToast, user }) {
         createdAt: Date.now(),
         creator: user.uid,
         text: "",
-        files: []
+        files: [],
+        connectionTrigger: 0
       });
       setLoading(false);
-      onJoin(code);
+      setShowSuccess(true);
+      setTimeout(() => {
+        onJoin(code);
+      }, 1500);
+
     } catch (err) {
       console.error(err);
       setLoading(false);
@@ -231,13 +247,11 @@ function LandingView({ onJoin, showToast, user }) {
         const url = new URL(rawValue);
         const room = url.searchParams.get("room");
         if (room && room.length === 6) {
-          setIsScanning(false);
           verifyAndJoin(room);
           return;
         }
       } catch (e) {
         if (rawValue.length === 6 && !isNaN(rawValue)) {
-          setIsScanning(false);
           verifyAndJoin(rawValue);
           return;
         }
@@ -253,12 +267,27 @@ function LandingView({ onJoin, showToast, user }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-6 font-sans">
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-6 font-sans relative overflow-hidden">
 
-      {/* --- UPDATED SCANNER OVERLAY (FLOATING UI) --- */}
-      {isScanning && (
+      {showSuccess && (
+        <div className="fixed inset-0 z-[200] bg-slate-900 flex flex-col items-center justify-center animate-in fade-in duration-300">
+
+          {/* Pure CSS Spinner */}
+          <div className="mb-8 relative">
+            {/* Outer Glow */}
+            <div className="absolute inset-0 rounded-full blur-xl bg-indigo-500/30"></div>
+            {/* The Spinner */}
+            <div className="w-24 h-24 border-4 border-slate-700 border-t-indigo-500 rounded-full animate-spin"></div>
+          </div>
+
+          <h2 className="text-3xl font-bold text-white mb-2 animate-pulse">
+            Creating room...
+          </h2>
+        </div>
+      )}
+
+      {isScanning && !showSuccess && (
         <div className="fixed inset-0 z-[100] bg-black">
-          {/* Close Button (Top Right) */}
           <button
             onClick={() => { setIsScanning(false); setScanError(null); }}
             className="absolute top-6 right-6 z-[120] bg-black/50 hover:bg-black/80 text-white p-2 rounded-full backdrop-blur-md transition-all"
@@ -266,7 +295,6 @@ function LandingView({ onJoin, showToast, user }) {
             <X className="w-8 h-8" />
           </button>
 
-          {/* Background Scanner */}
           <div className="absolute inset-0 flex items-center justify-center bg-black">
             {scanError ? (
               <div className="px-6 text-center z-[110]">
@@ -275,38 +303,20 @@ function LandingView({ onJoin, showToast, user }) {
                 <p className="text-slate-500 text-sm">Try typing the code manually.</p>
               </div>
             ) : (
-              <Scanner
-                onScan={handleScan}
-                onError={handleError}
-                components={{ audio: false, finder: false }}
-                styles={{ container: { width: '100%', height: '100%' }, video: { objectFit: 'cover' } }}
-                constraints={{ facingMode: 'environment' }}
-              />
+              <Scanner onScan={handleScan} onError={handleError} components={{ audio: false, finder: false }} styles={{ container: { width: '100%', height: '100%' }, video: { objectFit: 'cover' } }} constraints={{ facingMode: 'environment' }} />
             )}
           </div>
 
-          {/* Floating UI Overlay */}
           {!scanError && (
             <div className="absolute inset-0 z-[110] pointer-events-none flex flex-col items-center justify-between py-12">
-              <div className="bg-black/60 px-6 py-3 rounded-full text-sm font-medium backdrop-blur-md text-white mt-8">
-                Scan Room QR Code
-              </div>
-
-              {/* Decorative Finder */}
+              <div className="bg-black/60 px-6 py-3 rounded-full text-sm font-medium backdrop-blur-md text-white mt-8">Scan Room QR Code</div>
               <div className="w-64 h-64 border-2 border-white/50 rounded-2xl relative">
                 <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-blue-500 -ml-1 -mt-1 rounded-tl-md"></div>
                 <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-blue-500 -mr-1 -mt-1 rounded-tr-md"></div>
                 <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-blue-500 -ml-1 -mb-1 rounded-bl-md"></div>
                 <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-blue-500 -mr-1 -mb-1 rounded-br-md"></div>
               </div>
-
-              {/* Floating Cancel Button */}
-              <button
-                onClick={() => { setIsScanning(false); setScanError(null); }}
-                className="pointer-events-auto bg-white text-slate-900 font-bold py-3 px-8 rounded-full shadow-lg hover:scale-105 transition-transform"
-              >
-                Cancel Scan
-              </button>
+              <button onClick={() => { setIsScanning(false); setScanError(null); }} className="pointer-events-auto bg-white text-slate-900 font-bold py-3 px-8 rounded-full shadow-lg hover:scale-105 transition-transform">Cancel Scan</button>
             </div>
           )}
         </div>
@@ -319,17 +329,13 @@ function LandingView({ onJoin, showToast, user }) {
           <p className="text-slate-400">Share text & multiple files globally.</p>
         </div>
         <div className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700/50 backdrop-blur-sm space-y-6">
-
           <button onClick={createRoom} disabled={loading} className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold py-4 rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-900/20">
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Monitor className="w-5 h-5" />}
             <span>Start New Session</span>
           </button>
-
           <div className="relative text-center"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-700"></div></div><span className="relative px-2 bg-slate-800 text-slate-500 text-sm">OR JOIN</span></div>
-
           <form onSubmit={(e) => { e.preventDefault(); if (inputCode.length === 6) verifyAndJoin(inputCode); }} className="space-y-3">
-            <input type="number" maxLength={6} placeholder="Enter 6-digit Code" value={inputCode} onChange={(e) => setInputCode(e.target.value.replace(/\D/g, ''))} className="w-full bg-slate-900/50 border border-slate-700 text-white text-center text-2xl tracking-widest py-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" />
-
+            <input type="text" maxLength={6} placeholder="Enter 6-digit Code" value={inputCode} onChange={(e) => setInputCode(e.target.value.replace(/\D/g, ''))} className="w-full bg-slate-900/50 border border-slate-700 text-white text-center text-2xl tracking-widest py-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" />
             <div className="grid grid-cols-2 gap-3">
               <button type="submit" disabled={inputCode.length !== 6 || loading} className="flex items-center justify-center gap-2 bg-slate-700 disabled:opacity-50 hover:bg-slate-600 text-white font-medium py-3 rounded-xl transition-all">
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Smartphone className="w-5 h-5" />} <span>Join</span>
@@ -354,6 +360,10 @@ function SessionView({ user, roomCode, onExit, showToast }) {
   const [activeUploads, setActiveUploads] = useState({});
   const [showQR, setShowQR] = useState(false);
 
+  // --- NEW: Connection Animation State for Host ---
+  const [showNewDeviceAnim, setShowNewDeviceAnim] = useState(false);
+  const lastConnectionTime = useRef(0);
+
   const debounceRef = useRef(null);
   const docRef = doc(db, "sync_rooms", roomCode);
 
@@ -362,6 +372,23 @@ function SessionView({ user, roomCode, onExit, showToast }) {
       setConnected(true);
       if (docSnap.exists()) {
         const data = docSnap.data();
+
+        // --- LOGIC: DETECT NEW DEVICE CONNECTION ---
+        if (data.connectionTrigger && data.connectionTrigger > lastConnectionTime.current) {
+          // If this is the very first load, ignore it to prevent popup on refresh
+          if (lastConnectionTime.current !== 0) {
+            setShowQR(false); // Hide QR if open
+            setShowNewDeviceAnim(true); // Trigger Animation
+            setTimeout(() => setShowNewDeviceAnim(false), 2500); // Hide after 2.5s
+          }
+          lastConnectionTime.current = data.connectionTrigger;
+        }
+        else if (lastConnectionTime.current === 0 && data.connectionTrigger) {
+          // Sync initial state without triggering animation
+          lastConnectionTime.current = data.connectionTrigger;
+        }
+        // -------------------------------------------
+
         if (data.lastSender !== user.uid && data.text !== undefined) {
           setText(data.text);
           setLastUpdated(new Date());
@@ -400,8 +427,12 @@ function SessionView({ user, roomCode, onExit, showToast }) {
       const safeName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
       const storageRef = ref(storage, `uploads/${roomCode}/${safeName}`);
 
-      // Resumable upload used for progress bars
-      const uploadTask = uploadBytesResumable(storageRef, file);
+      const metadata = {
+        contentType: file.type,
+        contentDisposition: `attachment; filename="${file.name}"`
+      };
+
+      const uploadTask = uploadBytesResumable(storageRef, file, metadata);
 
       uploadTask.on('state_changed',
         (snapshot) => {
@@ -469,7 +500,18 @@ function SessionView({ user, roomCode, onExit, showToast }) {
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.origin + "?room=" + roomCode)}`;
 
   return (
-    <div className="min-h-screen bg-gray-50 text-slate-800 font-sans flex flex-col">
+    <div className="min-h-screen bg-gray-50 text-slate-800 font-sans flex flex-col relative">
+
+      {/* --- NEW DEVICE CONNECTED ANIMATION (FOR HOST) --- */}
+      {showNewDeviceAnim && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-blue-100 p-6 rounded-full mb-4 animate-bounce">
+            <Users className="w-16 h-16 text-blue-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-800 animate-pulse">New Device Connected!</h2>
+        </div>
+      )}
+
       <header className="bg-white border-b border-gray-200 px-4 py-3 shadow-sm flex items-center justify-between sticky top-0 z-20">
         <div className="flex items-center gap-3">
           <button onClick={onExit} className="p-2 hover:bg-gray-100 rounded-lg text-slate-500"><ArrowRight className="w-5 h-5 rotate-180" /></button>

@@ -10,7 +10,7 @@ import {
 } from "firebase/storage";
 import {
   Copy, Smartphone, Monitor, Zap, Download, Trash2, X, FileText,
-  UploadCloud, CheckCircle, Wifi, WifiOff, ArrowRight, Loader2, RefreshCw, AlertTriangle, QrCode, Camera, Users
+  UploadCloud, CheckCircle, Wifi, WifiOff, ArrowRight, Loader2, RefreshCw, AlertTriangle, QrCode, Camera, Users, Sparkles
 } from "lucide-react";
 
 // --- CONFIGURATION ---
@@ -183,8 +183,11 @@ function LandingView({ onJoin, showToast, user }) {
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
 
+  // --- ANIMATION STATE: 'create' | 'join' | null ---
+  const [animType, setAnimType] = useState(null);
+
+  // --- JOINER LOGIC (Guest) ---
   const verifyAndJoin = async (code) => {
     setLoading(true);
     try {
@@ -198,8 +201,8 @@ function LandingView({ onJoin, showToast, user }) {
         // 1. SIGNAL THE HOST
         await updateDoc(docRef, { connectionTrigger: Date.now() });
 
-        // 2. SHOW ANIMATION LOCALLY
-        setShowSuccess(true);
+        // 2. TRIGGER GREEN 'JOIN' ANIMATION
+        setAnimType('join');
         setTimeout(() => {
           onJoin(code);
         }, 1500);
@@ -215,6 +218,7 @@ function LandingView({ onJoin, showToast, user }) {
     }
   };
 
+  // --- CREATOR LOGIC (Host) ---
   const createRoom = async () => {
     setLoading(true);
     const code = generateRoomCode();
@@ -227,8 +231,11 @@ function LandingView({ onJoin, showToast, user }) {
         files: [],
         connectionTrigger: 0
       });
+
       setLoading(false);
-      setShowSuccess(true);
+
+      // --- TRIGGER BLUE 'CREATE' ANIMATION ---
+      setAnimType('create');
       setTimeout(() => {
         onJoin(code);
       }, 1500);
@@ -269,24 +276,30 @@ function LandingView({ onJoin, showToast, user }) {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-6 font-sans relative overflow-hidden">
 
-      {showSuccess && (
+      {/* --- ANIMATION 1: JOINING (GREEN CHECK) --- */}
+      {animType === 'join' && (
         <div className="fixed inset-0 z-[200] bg-slate-900 flex flex-col items-center justify-center animate-in fade-in duration-300">
-
-          {/* Pure CSS Spinner */}
-          <div className="mb-8 relative">
-            {/* Outer Glow */}
-            <div className="absolute inset-0 rounded-full blur-xl bg-indigo-500/30"></div>
-            {/* The Spinner */}
-            <div className="w-24 h-24 border-4 border-slate-700 border-t-indigo-500 rounded-full animate-spin"></div>
+          <div className="bg-green-500 rounded-full p-6 shadow-[0_0_50px_rgba(34,197,94,0.5)] animate-bounce mb-6">
+            <CheckCircle className="w-16 h-16 text-white" />
           </div>
-
-          <h2 className="text-3xl font-bold text-white mb-2 animate-pulse">
-            Creating room...
-          </h2>
+          <h2 className="text-3xl font-bold text-white mb-2 animate-pulse">Connected!</h2>
+          <p className="text-slate-400">Entering Room...</p>
         </div>
       )}
 
-      {isScanning && !showSuccess && (
+      {/* --- ANIMATION 2: CREATING (BLUE SPARKLES) --- */}
+      {animType === 'create' && (
+        <div className="fixed inset-0 z-[200] bg-slate-900 flex flex-col items-center justify-center animate-in fade-in duration-300">
+          <div className="bg-blue-500 rounded-full p-6 shadow-[0_0_50px_rgba(59,130,246,0.5)] animate-bounce mb-6">
+            <Sparkles className="w-16 h-16 text-white" />
+          </div>
+          <h2 className="text-3xl font-bold text-white mb-2 animate-pulse">Session Ready</h2>
+          <p className="text-slate-400">Initializing secure room...</p>
+        </div>
+      )}
+
+      {/* SCANNER OVERLAY */}
+      {isScanning && !animType && (
         <div className="fixed inset-0 z-[100] bg-black">
           <button
             onClick={() => { setIsScanning(false); setScanError(null); }}
@@ -303,25 +316,39 @@ function LandingView({ onJoin, showToast, user }) {
                 <p className="text-slate-500 text-sm">Try typing the code manually.</p>
               </div>
             ) : (
-              <Scanner onScan={handleScan} onError={handleError} components={{ audio: false, finder: false }} styles={{ container: { width: '100%', height: '100%' }, video: { objectFit: 'cover' } }} constraints={{ facingMode: 'environment' }} />
+              <Scanner
+                onScan={handleScan}
+                onError={handleError}
+                components={{ audio: false, finder: false }}
+                styles={{ container: { width: '100%', height: '100%' }, video: { objectFit: 'cover' } }}
+                constraints={{ facingMode: 'environment' }}
+              />
             )}
           </div>
 
           {!scanError && (
             <div className="absolute inset-0 z-[110] pointer-events-none flex flex-col items-center justify-between py-12">
-              <div className="bg-black/60 px-6 py-3 rounded-full text-sm font-medium backdrop-blur-md text-white mt-8">Scan Room QR Code</div>
+              <div className="bg-black/60 px-6 py-3 rounded-full text-sm font-medium backdrop-blur-md text-white mt-8">
+                Scan Room QR Code
+              </div>
               <div className="w-64 h-64 border-2 border-white/50 rounded-2xl relative">
                 <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-blue-500 -ml-1 -mt-1 rounded-tl-md"></div>
                 <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-blue-500 -mr-1 -mt-1 rounded-tr-md"></div>
                 <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-blue-500 -ml-1 -mb-1 rounded-bl-md"></div>
                 <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-blue-500 -mr-1 -mb-1 rounded-br-md"></div>
               </div>
-              <button onClick={() => { setIsScanning(false); setScanError(null); }} className="pointer-events-auto bg-white text-slate-900 font-bold py-3 px-8 rounded-full shadow-lg hover:scale-105 transition-transform">Cancel Scan</button>
+              <button
+                onClick={() => { setIsScanning(false); setScanError(null); }}
+                className="pointer-events-auto bg-white text-slate-900 font-bold py-3 px-8 rounded-full shadow-lg hover:scale-105 transition-transform"
+              >
+                Cancel Scan
+              </button>
             </div>
           )}
         </div>
       )}
 
+      {/* LANDING UI */}
       <div className="max-w-md w-full space-y-8">
         <div className="text-center space-y-2">
           <div className="inline-flex p-4 rounded-full bg-blue-500/10 ring-1 ring-blue-500/50 mb-2"><Zap className="w-8 h-8 text-blue-400" /></div>
@@ -329,13 +356,17 @@ function LandingView({ onJoin, showToast, user }) {
           <p className="text-slate-400">Share text & multiple files globally.</p>
         </div>
         <div className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700/50 backdrop-blur-sm space-y-6">
+
           <button onClick={createRoom} disabled={loading} className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold py-4 rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-900/20">
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Monitor className="w-5 h-5" />}
             <span>Start New Session</span>
           </button>
+
           <div className="relative text-center"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-700"></div></div><span className="relative px-2 bg-slate-800 text-slate-500 text-sm">OR JOIN</span></div>
+
           <form onSubmit={(e) => { e.preventDefault(); if (inputCode.length === 6) verifyAndJoin(inputCode); }} className="space-y-3">
             <input type="text" maxLength={6} placeholder="Enter 6-digit Code" value={inputCode} onChange={(e) => setInputCode(e.target.value.replace(/\D/g, ''))} className="w-full bg-slate-900/50 border border-slate-700 text-white text-center text-2xl tracking-widest py-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" />
+
             <div className="grid grid-cols-2 gap-3">
               <button type="submit" disabled={inputCode.length !== 6 || loading} className="flex items-center justify-center gap-2 bg-slate-700 disabled:opacity-50 hover:bg-slate-600 text-white font-medium py-3 rounded-xl transition-all">
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Smartphone className="w-5 h-5" />} <span>Join</span>
@@ -360,7 +391,7 @@ function SessionView({ user, roomCode, onExit, showToast }) {
   const [activeUploads, setActiveUploads] = useState({});
   const [showQR, setShowQR] = useState(false);
 
-  // --- NEW: Connection Animation State for Host ---
+  // --- CONNECTION ANIMATION STATE ---
   const [showNewDeviceAnim, setShowNewDeviceAnim] = useState(false);
   const lastConnectionTime = useRef(0);
 
@@ -373,21 +404,20 @@ function SessionView({ user, roomCode, onExit, showToast }) {
       if (docSnap.exists()) {
         const data = docSnap.data();
 
-        // --- LOGIC: DETECT NEW DEVICE CONNECTION ---
+        // --- DETECT NEW DEVICE CONNECTION ---
         if (data.connectionTrigger && data.connectionTrigger > lastConnectionTime.current) {
-          // If this is the very first load, ignore it to prevent popup on refresh
+          // If this is NOT the very first load, trigger animation
           if (lastConnectionTime.current !== 0) {
-            setShowQR(false); // Hide QR if open
-            setShowNewDeviceAnim(true); // Trigger Animation
-            setTimeout(() => setShowNewDeviceAnim(false), 2500); // Hide after 2.5s
+            setShowQR(false);
+            setShowNewDeviceAnim(true);
+            setTimeout(() => setShowNewDeviceAnim(false), 2500);
           }
           lastConnectionTime.current = data.connectionTrigger;
         }
         else if (lastConnectionTime.current === 0 && data.connectionTrigger) {
-          // Sync initial state without triggering animation
           lastConnectionTime.current = data.connectionTrigger;
         }
-        // -------------------------------------------
+        // ------------------------------------
 
         if (data.lastSender !== user.uid && data.text !== undefined) {
           setText(data.text);
@@ -502,7 +532,7 @@ function SessionView({ user, roomCode, onExit, showToast }) {
   return (
     <div className="min-h-screen bg-gray-50 text-slate-800 font-sans flex flex-col relative">
 
-      {/* --- NEW DEVICE CONNECTED ANIMATION (FOR HOST) --- */}
+      {/* NEW DEVICE CONNECTED ANIMATION (FOR HOST) */}
       {showNewDeviceAnim && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="bg-blue-100 p-6 rounded-full mb-4 animate-bounce">
